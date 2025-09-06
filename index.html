@@ -55,6 +55,10 @@
       font-size: 14px;
       line-height: 20px;
     }
+    #scoreboard {
+      margin-top: 20px;
+      font-size: 20px;
+    }
   </style>
 </head>
 <body>
@@ -62,6 +66,7 @@
   <div id="menu">
     <button class="green" onclick="startRace()">Start Race</button><br>
     <button class="yellow" onclick="openGarage()">Garage</button><br>
+    <button class="yellow" onclick="openProfile()">Profile</button><br>
     <button class="red" onclick="quitGame()">Quit</button>
   </div>
 
@@ -79,6 +84,15 @@
     <button class="gray" onclick="backToMenu()">Back</button>
   </div>
 
+  <div id="profile" style="display:none;">
+    <h2>Profile 👤</h2>
+    <p>Enter your name:</p>
+    <input type="text" id="playerNameInput" placeholder="Your name" style="font-size:20px;padding:5px;">
+    <br><br>
+    <button class="green" onclick="saveProfile()">Save</button>
+    <button class="gray" onclick="backToMenu()">Back</button>
+  </div>
+
   <div id="game" style="display:none;">
     <canvas id="gameCanvas" width="1000" height="400"></canvas>
     <div id="word"></div>
@@ -91,7 +105,11 @@
     <div class="progress-container"><div id="progress3" class="progress-bar" style="background:green;">Player 3</div></div>
 
     <div id="winner"></div>
+    <button id="restartBtn" class="green" style="display:none;" onclick="resetRace()">Restart Race</button>
     <button class="gray" onclick="backToMenu()">Back to Menu</button>
+
+    <!-- Scoreboard -->
+    <div id="scoreboard"></div>
   </div>
 
   <script>
@@ -100,9 +118,13 @@
 
     let currentWord, typedWord;
     let playerX, playerY, bot1X, bot1Y, bot2X, bot2Y;
-    let finishX = 900; // race longer
+    let finishX = 900; 
     let winner = null;
     let playerColor = "blue";
+    let playerName = "You";
+    let raceStarted = false;
+
+    let scores = { player: 0, bot1: 0, bot2: 0 };
 
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
@@ -114,7 +136,9 @@
       bot1X = 50; bot1Y = 120;
       bot2X = 50; bot2Y = 280;
       winner = null;
+      raceStarted = true;
       document.getElementById("winner").innerText = "";
+      document.getElementById("restartBtn").style.display = "none";
       updateProgress();
     }
 
@@ -137,18 +161,30 @@
 
     function updateProgress() {
       document.getElementById("progress1").style.width = Math.min((playerX / finishX) * 100, 100) + "%";
+      document.getElementById("progress1").innerText = playerName;
       document.getElementById("progress2").style.width = Math.min((bot1X / finishX) * 100, 100) + "%";
+      document.getElementById("progress2").innerText = "Player 2";
       document.getElementById("progress3").style.width = Math.min((bot2X / finishX) * 100, 100) + "%";
+      document.getElementById("progress3").innerText = "Player 3";
+    }
+
+    function updateScoreboard() {
+      document.getElementById("scoreboard").innerHTML = `
+        <h3>Scoreboard</h3>
+        ${playerName}: ${scores.player} wins<br>
+        Player 2: ${scores.bot1} wins<br>
+        Player 3: ${scores.bot2} wins
+      `;
     }
 
     function update() {
-      if (!winner) {
-        bot1X += Math.random() * 1 + 0.5; // slower
-        bot2X += Math.random() * 1 + 0.5; // slower
+      if (raceStarted && !winner) {
+        bot1X += Math.random() * 1 + 0.5; 
+        bot2X += Math.random() * 1 + 0.5; 
 
-        if (playerX >= finishX) winner = "YOU 🏆";
-        if (bot1X >= finishX) winner = "Player 2";
-        if (bot2X >= finishX) winner = "Player 3";
+        if (playerX >= finishX) { winner = playerName; scores.player++; }
+        if (bot1X >= finishX) { winner = "Player 2"; scores.bot1++; }
+        if (bot2X >= finishX) { winner = "Player 3"; scores.bot2++; }
       }
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -160,6 +196,9 @@
 
       if (winner) {
         document.getElementById("winner").innerText = winner + " WON!";
+        document.getElementById("restartBtn").style.display = "inline-block";
+        updateScoreboard();
+        raceStarted = false;
       }
 
       requestAnimationFrame(update);
@@ -173,9 +212,7 @@
         typedWord = typedWord.slice(0, -1);
       } else if (e.key === "Enter") {
         if (typedWord === currentWord) {
-          playerX += 80;
-          typedWord = "";
-          currentWord = words[Math.floor(Math.random() * words.length)];
+          playerX = finishX; 
         } else {
           typedWord = "";
         }
@@ -187,6 +224,7 @@
     function startRace() {
       document.getElementById("menu").style.display = "none";
       document.getElementById("garage").style.display = "none";
+      document.getElementById("profile").style.display = "none";
       document.getElementById("game").style.display = "block";
       resetRace();
       update();
@@ -196,6 +234,20 @@
       document.getElementById("menu").style.display = "none";
       document.getElementById("garage").style.display = "block";
       document.getElementById("game").style.display = "none";
+      document.getElementById("profile").style.display = "none";
+    }
+
+    function openProfile() {
+      document.getElementById("menu").style.display = "none";
+      document.getElementById("garage").style.display = "none";
+      document.getElementById("profile").style.display = "block";
+      document.getElementById("game").style.display = "none";
+    }
+
+    function saveProfile() {
+      const input = document.getElementById("playerNameInput").value.trim();
+      if (input.length > 0) playerName = input;
+      backToMenu();
     }
 
     function setCarColor(color) {
@@ -206,6 +258,7 @@
     function backToMenu() {
       document.getElementById("menu").style.display = "block";
       document.getElementById("garage").style.display = "none";
+      document.getElementById("profile").style.display = "none";
       document.getElementById("game").style.display = "none";
     }
 
