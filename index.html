@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Speed Type</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { --panel:#fff; --ink:#111; --border:#000; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,Arial,sans-serif;background:#f5f5f5;color:var(--ink);text-align:center}
+  h1{margin:18px 0 6px}
+  .wrap{max-width:900px;margin:0 auto;padding:12px}
+  .screen{display:none}
+  .screen.active{display:block}
+  .card{background:var(--panel);border:3px solid var(--border);border-radius:12px;padding:16px;margin:12px auto;box-shadow:4px 4px 0 #0002}
+  button{cursor:pointer;border:3px solid var(--border);border-radius:10px;padding:10px 16px;margin:6px;font-size:16px;background:#fff}
+  button:active{transform:translateY(1px)}
+  canvas{border:3px solid #000;background:#fff;display:block;margin:10px auto}
+  .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .pill{display:inline-flex;gap:8px;align-items:center;padding:6px 10px;border:3px solid #000;border-radius:999px;background:#fff;font-weight:700}
+  .coin{width:14px;height:14px;border-radius:50%;background:gold;border:2px solid #000}
+  .shop-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+  .shop-item{border:2px solid #000;border-radius:10px;padding:10px;background:#fff}
+  .garage-car{border:2px solid #000;border-radius:10px;padding:6px;background:#fff;cursor:pointer}
+  .garage-car.selected{outline:4px solid #ffd43b}
+  .thumb{width:150px;height:70px;object-fit:contain}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🏎️ Speed Type</h1>
+  <div class="pill"><span class="coin"></span> <span id="coinCount">0</span> coins</div>
+
+  <!-- MENU -->
+  <section id="menu" class="screen card active">
+    <div class="row">
+      <button data-route="game">Start Race</button>
+      <button data-route="garage">Garage</button>
+      <button data-route="shop">Shop</button>
+    </div>
+    <div style="margin-top:8px">
+      <input id="nameInput" placeholder="Enter your name" style="padding:8px 12px;border:2px solid #000;border-radius:10px"/>
+      <button id="saveNameBtn">Save Name</button>
+    </div>
+    <p id="profileLabel" style="margin:6px 0 0">Profile: Guest</p>
+  </section>
+
+  <!-- GARAGE -->
+  <section id="garage" class="screen card">
+    <h2>Garage</h2>
+    <p>Select a car you own.</p>
+    <div id="garageList" class="shop-grid"></div>
+    <button data-route="menu">Back</button>
+  </section>
+
+  <!-- SHOP -->
+  <section id="shop" class="screen card">
+    <h2>Shop</h2>
+    <p>Win races to earn coins, then buy more cars.</p>
+    <div id="shopList" class="shop-grid"></div>
+    <button data-route="menu">Back</button>
+  </section>
+
+  <!-- GAME -->
+  <section id="game" class="screen card">
+    <canvas id="cv" width="800" height="360"></canvas>
+    <p>Type this word: <b id="word"></b></p>
+    <input id="typeBox" placeholder="type here" autocomplete="off"
+           style="padding:8px 12px;border:2px solid #000;border-radius:10px"/>
+    <p id="result" style="min-height:24px"></p>
+    <button id="restartBtn">Restart</button>
+    <button data-route="menu">Back to Menu</button>
+  </section>
+</div>
+
+<script>
+/* ---------- STATE & PERSIST ---------- */
+const defaultState = {
+  name: "Guest",
+  coins: 0,
+  selectedCar: "blue",
+  unlocked: ["blue","red"] // starter cars
+};
+const state = load();
+
+function load(){
+  try{
+    const raw = localStorage.getItem("speedtype_state");
+    if(!raw) return {...defaultState};
+    const obj = JSON.parse(raw);
+    return { ...defaultState, ...obj };
+  }catch{ return {...defaultState}; }
+}
+function save(){
+  localStorage.setItem("speedtype_state", JSON.stringify(state));
+  updateTopBar();
+}
+
+/* ---------- UI HELPERS ---------- */
+const $ = id => document.getElementById(id);
+function route(to){
+  // swap screens
+  document.querySelectorAll(".screen").forEach(el => el.classList.remove("active"));
+  $(to).classList.add("active");
+  // screen hooks
+  if(to==="garage") renderGarage();
+  if(to==="shop") renderShop();
+  if(to==="game") startRace();
+}
+function updateTopBar(){
+  $("coinCount").textContent = state.coins;
+  $("profileLabel").textContent = "Profile: " + state.name;
+  $("nameInput").value = state.name === "Guest" ? "" : state.name;
+}
+
+/* ---------- CAR CATALOG ---------- */
+const cars = [
+  { id:"blue",   name:"Blue",   price:0,   color:"#0ea5e9" },
+  { id:"red",    name:"Red",    price:10,  color:"#ef4444" },
+  { id:"green",  name:"Green",  price:20,  color:"#22c55e" },
+  { id:"yellow", name:"Yellow", price:30,  color:"#ffd43b" },
+  { id:"purple", name:"Purple", price:50,  color:"#7c3aed" },
+  { id:"black",  name:"Black",  price:70,  color:"#111111" },
+  // Admin supercar: only visible/usable when name === "ownedkid"
+  { id:"admin",  name:"Admin Supercar", price:0, color:"special", adminOnly:true }
+];
+
+// admin sprite (top view). Falls back to SVG if image missing.
+const adminImg = new Image();
+let adminImgLoaded = false;
+adminImg.onload = () => adminImgLoaded = true;
+adminImg.onerror = () => adminImgLoaded = false;
+adminImg.src = "A_2D_digital_illustration_displays_a_top-down_view.png"; // place next to index.html
+
+function carSVG(color="#0ea5e9"){
+  const svg = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="220" height="100" viewBox="0 0 220 100">
+    <rect width="220" height="100" fill="none"/>
+    <rect x="60" y="10" width="100" height="80" rx="16" fill="${color}" stroke="#111" stroke-width="4"/>
+    <rect x="82" y="15" width="56" height="22" rx="8" fill="#cbe7ff" stroke="#111" stroke-width="3"/>
+    <rect x="82" y="63" width="56" height="22" rx="8" fill="#cbe7ff" stroke="#111" stroke-width="3"/>
+    <rect x="108" y="10" width="6" height="80" fill="#ffffff88"/>
+    <rect x="60" y="45" width="100" height="10" fill="#000" opacity=".15"/>
+  </svg>`;
+  const img = new Image();
+  img.src = "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+  return img;
+}
+
+/* ---------- SHOP & GARAGE ---------- */
+function renderShop(){
+  const box = $("shopList"); box.innerHTML = "";
+  cars.forEach(car=>{
+    if(car.adminOnly && state.name !== "ownedkid") return; // hide admin for others
+    const owned = state.unlocked.includes(car.id) || (car.adminOnly && state.name==="ownedkid");
+    if(owned) return; // don’t show owned in shop
+
+    const div = document.createElement("div"); div.className="shop-item";
+    const img = (car.id==="admin")
+      ? (adminImgLoaded ? Object.assign(new Image(),{src:adminImg.src,className:"thumb"}) : Object.assign(carSVG("#d61f69"),{className:"thumb"}))
+      : Object.assign(carSVG(car.color),{className:"thumb"});
+    const name = document.createElement("div"); name.textContent = car.name;
+    const price = document.createElement("div"); price.textContent = `${car.price} coins`;
+    const btn = document.createElement("button");
+    btn.textContent = (state.coins>=car.price) ? "Buy" : "Need coins";
+    btn.disabled = state.coins<car.price;
+    btn.onclick = ()=>{
+      state.coins -= car.price;
+      state.unlocked.push(car.id);
+      save(); renderShop();
+    };
+    div.append(img,name,price,btn);
+    box.appendChild(div);
+  });
+}
+
+function renderGarage(){
+  const box = $("garageList"); box.innerHTML = "";
+  cars.forEach(car=>{
+    const owned = state.unlocked.includes(car.id) || car.price===0 || (car.adminOnly && state.name==="ownedkid");
+    if(!owned) return;
+    const div = document.createElement("div"); div.className="garage-car";
+    const thumb = (car.id==="admin")
+      ? (adminImgLoaded ? Object.assign(new Image(),{src:adminImg.src,className:"thumb"}) : Object.assign(carSVG("#d61f69"),{className:"thumb"}))
+      : Object.assign(carSVG(car.color),{className:"thumb"});
+    const label = document.createElement("div"); label.textContent = car.name;
+    if(state.selectedCar===car.id) div.classList.add("selected");
+    div.onclick = ()=>{ state.selectedCar = car.id; save(); renderGarage(); };
+    div.append(thumb,label); box.appendChild(div);
+  });
+}
+
+/* ---------- GAME ---------- */
+const words = ["pizza","spaghetti","ciao","vespa","gelato","pesto","rome","ferrari","pasta","bravo"];
+const cv = $("cv"); const ctx = cv.getContext("2d");
+let currentWord="", playerX=40, botX=40, finish=720, raceOver=false;
+
+function startRace(){
+  currentWord = words[Math.floor(Math.random()*words.length)];
+  $("word").textContent = currentWord;
+  $("typeBox").value = "";
+  $("result").textContent = "";
+  playerX=40; botX=40; raceOver=false;
+  draw();
+}
+
+$("restartBtn").addEventListener("click", startRace);
+$("typeBox").addEventListener("input", ()=>{
+  if(raceOver) return;
+  if($("typeBox").value === currentWord){
+    const baseStep = 60;
+    const boost = (state.selectedCar==="admin" && state.name==="ownedkid") ? 2 : 1;
+    playerX += baseStep * boost;
+    $("typeBox").value = "";
+    currentWord = words[Math.floor(Math.random()*words.length)];
+    $("word").textContent = currentWord;
+    if(playerX >= finish){ raceOver=true; $("result").textContent="You win! +20 coins"; state.coins+=20; save(); }
+  }
+});
+
+function botTick(){
+  if(!$("game").classList.contains("active") || raceOver) return;
+  botX += 18 + Math.random()*12; // slow-ish bot
+  if(botX >= finish){ raceOver=true; $("result").textContent="Bot wins!"; }
+  draw();
+}
+setInterval(botTick, 700);
+
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  // finish line
+  ctx.fillStyle="#000"; ctx.fillRect(finish,0,6,cv.height);
+  // player
+  if(state.selectedCar==="admin" && state.name==="ownedkid" && adminImgLoaded){
+    ctx.drawImage(adminImg, playerX-30, 130, 120, 80); // top-down sprite
+  }else{
+    // fallback car (top view style)
+    const img = carSVG(cars.find(c=>c.id===state.selectedCar)?.color || "#0ea5e9");
+    // draw SVG to canvas when loaded
+    img.onload = ()=> ctx.drawImage(img, playerX-30, 130, 120, 60);
+    if(img.complete) ctx.drawImage(img, playerX-30, 130, 120, 60);
+  }
+  // bot car (simple)
+  ctx.fillStyle="#ef4444"; ctx.fillRect(botX-25, 150, 100, 40);
+}
+
+/* ---------- INIT & EVENTS ---------- */
+document.querySelectorAll("[data-route]").forEach(btn=>{
+  btn.addEventListener("click", e=> route(e.currentTarget.getAttribute("data-route")));
+});
+$("saveNameBtn").addEventListener("click", ()=>{
+  const v = $("nameInput").value.trim();
+  state.name = v || "Guest";
+  // if admin was selected but name no longer ownedkid, revert
+  if(state.selectedCar==="admin" && state.name!=="ownedkid"){ state.selectedCar="blue"; }
+  save();
+});
+
+updateTopBar(); // initial UI
+// ensure we never start with admin selected unless allowed
+if(state.selectedCar==="admin" && state.name!=="ownedkid"){ state.selectedCar="blue"; save(); }
+</script>
+</body>
+</html>
